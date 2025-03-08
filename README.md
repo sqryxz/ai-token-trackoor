@@ -1,70 +1,53 @@
-# AI Token Trackoor 🤖💰
+# AI Token Watcher
 
-A Python-based cryptocurrency tracking tool that aggregates information about newly listed and trending AI-related tokens. The tool scrapes data from multiple sources and provides daily summaries of token performance and social sentiment analysis.
+A Python-based tool that monitors and analyzes AI-related cryptocurrency tokens, providing sentiment analysis from multiple sources and tracking market performance.
 
-## 🌟 Features
+## Features
 
-- **Multi-Source Data Aggregation**
-  - Scrapes data from CoinGecko API
-  - Monitors CoinMarketCap's AI crypto section
-  - Automatically deduplicates tokens from multiple sources
+- **Multi-Source Token Discovery**
+  - Tracks trending AI tokens from CoinGecko and CoinMarketCap
+  - Identifies newly listed AI-related tokens
+  - Monitors specific AI token categories
+  - Limited to top 5 tokens per source for focused analysis
 
-- **AI Token Detection**
-  - Tracks trending coins with AI capabilities
-  - Identifies tokens with AI-related names or descriptions
-  - Monitors market cap rankings for AI tokens
+- **Comprehensive Data Collection**
+  - Price and market cap tracking
+  - 24h and 7d price changes
+  - Trading volume monitoring
+  - Market cap ranking
 
-- **Comprehensive Price Analysis**
-  - Current price in USD
-  - 24-hour price changes
-  - 7-day price movement trends
-  - Trading volume analysis
-  - Market capitalization tracking
-
-- **Advanced Sentiment Analysis**
-  - Integration with StockGeist.ai
-  - Real-time sentiment scoring
-  - Social media engagement metrics
-  - Volume of social discussions
-  - Sentiment trend analysis
+- **Sentiment Analysis**
+  - Reddit community sentiment
+  - Crypto news sentiment via CryptoCompare
+  - Combined sentiment scoring
+  - Social engagement metrics
 
 - **Automated Reporting**
   - Daily report generation
-  - JSON format for easy parsing
-  - Historical data tracking
-  - Timestamp-based organization
+  - JSON format for easy integration
+  - Historical data storage
+  - Top tokens summary
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.8 or higher
-- pip (Python package installer)
-- StockGeist.ai API key
-
-### Installation
+## Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/sqryxz/ai-token-trackoor.git
-   cd ai-token-trackoor
-   ```
+```bash
+git clone https://github.com/yourusername/ai-token-watcher.git
+cd ai-token-watcher
+```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+2. Install required packages:
+```bash
+pip install -r requirements.txt
+```
 
 3. Set up environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` and add your StockGeist.ai API key:
-   ```
-   STOCKGEIST_API_KEY=your_stockgeist_api_key_here
-   ```
+   - Copy `.env.example` to `.env`
+   - Add your API keys:
+     - CryptoCompare API key
+     - (Optional) Additional API keys as needed
 
-### Usage
+## Usage
 
 Run the script:
 ```bash
@@ -72,63 +55,92 @@ python main.py
 ```
 
 The script will:
-- Start monitoring AI-related tokens immediately
-- Generate an initial report
-- Continue running and generate daily reports at midnight
-- Store reports in the `reports` directory
+1. Fetch AI-related tokens from multiple sources
+2. Analyze sentiment from Reddit and crypto news
+3. Generate a daily report in the `reports` directory
+4. Continue running and update daily at midnight
 
-## 📊 Report Structure
+## Configuration
 
-Reports are generated in JSON format with the following structure:
+### Environment Variables
+
+Create a `.env` file with the following variables:
+```
+CRYPTOCOMPARE_API_KEY=your_api_key_here
+```
+
+### Customization
+
+You can modify the following parameters in the code:
+- Number of tokens per source (default: 5)
+- Sentiment analysis thresholds
+- Report generation frequency
+- Token filtering criteria
+
+## Output
+
+Reports are generated in JSON format in the `reports` directory with the following structure:
 ```json
 {
-    "timestamp": "2024-03-21T00:00:00.000Z",
-    "total_tokens_tracked": 25,
+    "timestamp": "ISO-8601-timestamp",
+    "total_tokens_tracked": "number",
     "tokens": [
         {
-            "name": "AI Token Name",
-            "symbol": "AIT",
-            "market_cap_rank": 123,
-            "source": "coingecko_trending",
+            "name": "Token Name",
+            "symbol": "SYMBOL",
+            "market_cap_rank": "rank",
             "price_data": {
-                "current_price": 1.23,
-                "price_change_24h": 5.67,
-                "price_change_7d": -2.34,
-                "market_cap": 1000000,
-                "volume_24h": 500000
+                "current_price": "usd_price",
+                "price_change_24h": "percentage",
+                "price_change_7d": "percentage",
+                "market_cap": "usd_value",
+                "volume_24h": "usd_value"
             },
             "sentiment_data": {
-                "sentiment_score": 0.75,
-                "sentiment_label": "bullish",
-                "social_volume": 1500,
-                "social_engagement": 25000,
-                "timestamp": "2024-03-21T00:00:00.000Z"
+                "reddit": {
+                    "sentiment_score": "float",
+                    "sentiment_label": "bullish/bearish/neutral",
+                    "social_volume": "number",
+                    "social_engagement": "number"
+                },
+                "news": {
+                    "sentiment_score": "float",
+                    "sentiment_label": "bullish/bearish/neutral",
+                    "articles_count": "number"
+                },
+                "combined": {
+                    "sentiment_score": "float",
+                    "sentiment_label": "bullish/bearish/neutral"
+                }
             }
         }
     ]
 }
 ```
 
-## 📅 Scheduling
+## Dependencies
 
-- Reports are generated daily at midnight (00:00)
-- Each report is saved with a timestamp-based filename
-- Historical reports are preserved for trend analysis
+- `requests`: HTTP requests
+- `beautifulsoup4`: Web scraping
+- `python-dotenv`: Environment variable management
+- `pandas`: Data manipulation
+- `schedule`: Task scheduling
+- `pycoingecko`: CoinGecko API client
+- `textblob`: Sentiment analysis
+- `cryptocompare`: CryptoCompare API client
 
-## 🔒 Security
+## Contributing
 
-- API keys are stored in `.env` file (not tracked by Git)
-- Reports directory is excluded from Git tracking
-- Sensitive data is not logged or exposed
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## 🤝 Contributing
+## License
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📝 License
+## Disclaimer
 
-This project is open source and available under the MIT License.
-
-## ⚠️ Disclaimer
-
-This tool is for informational purposes only. Not financial advice. Always do your own research before making investment decisions. 
+This tool is for informational purposes only. Not financial advice. Always do your own research before making any investment decisions. 

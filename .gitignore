@@ -24,7 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Reports directory
+# Reports directory (contains generated data)
 reports/
 
 # IDE specific files

@@ -8,9 +8,10 @@ from bs4 import BeautifulSoup
 from pycoingecko import CoinGeckoAPI
 from dotenv import load_dotenv
 import pandas as pd
-import praw
 from textblob import TextBlob
 import cryptocompare
+import re
+from urllib.parse import quote_plus
 
 # Load environment variables
 load_dotenv()
@@ -21,15 +22,13 @@ class AITokenWatcher:
         self.reports_dir = "reports"
         os.makedirs(self.reports_dir, exist_ok=True)
         
-        # Initialize Reddit client
-        self.reddit = praw.Reddit(
-            client_id=os.getenv("REDDIT_CLIENT_ID"),
-            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-            user_agent=os.getenv("REDDIT_USER_AGENT")
-        )
-        
         # Initialize CryptoCompare
         cryptocompare.cryptocompare._set_api_key_parameter(os.getenv("CRYPTOCOMPARE_API_KEY"))
+        
+        # Headers for web scraping
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
 
     def analyze_text_sentiment(self, text):
         """Analyze sentiment of a text using TextBlob"""
@@ -54,52 +53,81 @@ class AITokenWatcher:
             return None
 
     def get_reddit_sentiment(self, token_name, token_symbol, limit=100):
-        """Get sentiment from Reddit posts and comments"""
+        """Get sentiment from Reddit posts using web scraping"""
         try:
             # Search in relevant subreddits
             subreddits = ['CryptoCurrency', 'CryptoMarkets', 'AltStreetBets', 'CryptoTechnology']
-            posts = []
+            posts_data = []
             
             for subreddit in subreddits:
-                # Search for posts containing token name or symbol
-                search_query = f"{token_name} OR {token_symbol}"
-                subreddit_posts = self.reddit.subreddit(subreddit).search(
-                    search_query,
-                    time_filter='week',
-                    limit=25
-                )
-                posts.extend(subreddit_posts)
+                # Create search URL
+                search_query = quote_plus(f"{token_name} OR {token_symbol}")
+                url = f"https://www.reddit.com/r/{subreddit}/search/?q={search_query}&restrict_sr=1&t=week&sort=top"
+                
+                try:
+                    response = requests.get(url, headers=self.headers)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # Find all post containers
+                        posts = soup.find_all('div', {'data-testid': 'post-container'})
+                        for post in posts[:25]:  # Limit to top 25 posts per subreddit
+                            try:
+                                # Extract post title
+                                title = post.find('h3')
+                                if title:
+                                    title_text = title.text.strip()
+                                    
+                                    # Extract upvotes
+                                    upvotes = post.find('div', {'data-testid': 'post-score'})
+                                    upvote_count = 0
+                                    if upvotes:
+                                        upvote_text = upvotes.text.strip()
+                                        if 'k' in upvote_text.lower():
+                                            upvote_count = int(float(upvote_text.replace('k', '')) * 1000)
+                                        else:
+                                            upvote_count = int(upvote_text)
+                                    
+                                    # Extract comments count
+                                    comments = post.find('span', string=re.compile(r'\d+\s*comments?'))
+                                    comment_count = 0
+                                    if comments:
+                                        comment_text = comments.text.strip()
+                                        comment_count = int(re.search(r'\d+', comment_text).group())
+                                    
+                                    posts_data.append({
+                                        'title': title_text,
+                                        'upvotes': upvote_count,
+                                        'comments': comment_count,
+                                        'subreddit': subreddit
+                                    })
+                            except Exception as e:
+                                print(f"Error processing post: {e}")
+                                continue
+                                
+                except Exception as e:
+                    print(f"Error fetching subreddit {subreddit}: {e}")
+                    continue
+                
+                # Add delay between requests
+                time.sleep(2)
             
-            if not posts:
+            if not posts_data:
                 return None
             
-            # Analyze sentiment of posts and comments
+            # Analyze sentiment of posts
             sentiments = []
-            total_score = 0  # Combined upvotes
+            total_score = 0
             total_comments = 0
             
-            for post in posts:
-                # Analyze post title and body
-                if post.title:
-                    title_sentiment = self.analyze_text_sentiment(post.title)
-                    if title_sentiment:
-                        sentiments.append(title_sentiment['score'])
+            for post in posts_data:
+                if post['title']:
+                    sentiment = self.analyze_text_sentiment(post['title'])
+                    if sentiment:
+                        sentiments.append(sentiment['score'])
                 
-                if post.selftext:
-                    body_sentiment = self.analyze_text_sentiment(post.selftext)
-                    if body_sentiment:
-                        sentiments.append(body_sentiment['score'])
-                
-                total_score += post.score
-                total_comments += post.num_comments
-                
-                # Get top comments
-                post.comments.replace_more(limit=0)
-                for comment in post.comments.list()[:10]:
-                    if comment.body:
-                        comment_sentiment = self.analyze_text_sentiment(comment.body)
-                        if comment_sentiment:
-                            sentiments.append(comment_sentiment['score'])
+                total_score += post['upvotes']
+                total_comments += post['comments']
             
             if not sentiments:
                 return None
@@ -118,7 +146,7 @@ class AITokenWatcher:
             return {
                 'sentiment_score': avg_sentiment,
                 'sentiment_label': sentiment_label,
-                'social_volume': len(posts),
+                'social_volume': len(posts_data),
                 'social_engagement': total_score + total_comments,
                 'source': 'reddit',
                 'timestamp': datetime.now().isoformat()
@@ -131,15 +159,26 @@ class AITokenWatcher:
     def get_news_sentiment(self, token_symbol):
         """Get news sentiment from CryptoCompare"""
         try:
-            # Get news articles
-            news = cryptocompare.get_news_articles(feeds='all')
+            # Get news articles using the correct CryptoCompare endpoint
+            url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key={os.getenv('CRYPTOCOMPARE_API_KEY')}"
+            response = requests.get(url)
+            if response.status_code != 200:
+                print(f"Error fetching news: {response.status_code}")
+                return None
+                
+            news_data = response.json()
+            if not news_data.get('Data'):
+                return None
+                
             relevant_news = []
-            
             # Filter news related to the token
-            for article in news:
-                if (token_symbol.lower() in article['title'].lower() or 
-                    'ai' in article['title'].lower() or 
-                    'artificial intelligence' in article['title'].lower()):
+            for article in news_data['Data']:
+                # Check if token is mentioned in title, body or categories
+                if (token_symbol.lower() in article['title'].lower() or
+                    'ai' in article['title'].lower() or
+                    'artificial intelligence' in article['title'].lower() or
+                    token_symbol.lower() in article.get('body', '').lower() or
+                    any(cat.lower() == 'ai' for cat in article.get('categories', '').split('|'))):
                     relevant_news.append(article)
             
             if not relevant_news:
@@ -151,6 +190,12 @@ class AITokenWatcher:
                 title_sentiment = self.analyze_text_sentiment(article['title'])
                 if title_sentiment:
                     sentiments.append(title_sentiment['score'])
+                
+                # Also analyze body text if available
+                if article.get('body'):
+                    body_sentiment = self.analyze_text_sentiment(article['body'])
+                    if body_sentiment:
+                        sentiments.append(body_sentiment['score'])
             
             if not sentiments:
                 return None
@@ -215,12 +260,31 @@ class AITokenWatcher:
             print("Fetching data from CoinGecko...")
             # Get trending coins
             trending = self.coingecko.get_search_trending()
-            # Get tokens with 'ai' in their name or description
+            
+            # Get newly listed tokens (last 14 days)
+            newly_listed = []
+            try:
+                # Get latest coins with 'ai' filter
+                new_coins = self.coingecko.get_coins_markets(
+                    vs_currency='usd',
+                    order='id_desc',  # Latest first
+                    per_page=50,  # Reduced from 250 to 50 since we only need 5
+                    sparkline=False
+                )
+                two_weeks_ago = datetime.now() - timedelta(days=14)
+                newly_listed = [
+                    coin for coin in new_coins 
+                    if coin.get('genesis_date') and datetime.strptime(coin['genesis_date'], '%Y-%m-%d') > two_weeks_ago
+                ][:5]  # Limit to 5 newest coins
+            except Exception as e:
+                print(f"Error fetching new coins: {e}")
+            
+            # Get AI-related tokens
             search_results = self.coingecko.search('ai')
             
             tokens = []
-            # Process trending coins
-            for coin in trending['coins']:
+            # Process trending coins (limit to 5)
+            for coin in trending['coins'][:5]:
                 token_data = coin['item']
                 tokens.append({
                     'name': token_data['name'],
@@ -230,9 +294,26 @@ class AITokenWatcher:
                     'source': 'coingecko_trending'
                 })
             
-            # Process AI-related coins
+            # Process newly listed coins (already limited to 5)
+            for coin in newly_listed:
+                # Check if it's AI-related
+                if any(term in coin['name'].lower() or term in coin['symbol'].lower() 
+                      for term in ['ai', 'artificial', 'intelligence', 'neural', 'machine', 'learn']):
+                    tokens.append({
+                        'name': coin['name'],
+                        'symbol': coin['symbol'],
+                        'market_cap_rank': coin['market_cap_rank'],
+                        'coingecko_id': coin['id'],
+                        'source': 'coingecko_new'
+                    })
+            
+            # Process AI-related coins (limit to 5)
+            ai_tokens_added = 0
             for coin in search_results['coins']:
-                if 'ai' in coin['name'].lower() or 'ai' in coin['symbol'].lower():
+                if ai_tokens_added >= 5:
+                    break
+                if any(term in coin['name'].lower() or term in coin['symbol'].lower() 
+                      for term in ['ai', 'artificial', 'intelligence', 'neural', 'machine', 'learn']):
                     tokens.append({
                         'name': coin['name'],
                         'symbol': coin['symbol'],
@@ -240,6 +321,11 @@ class AITokenWatcher:
                         'coingecko_id': coin.get('id'),
                         'source': 'coingecko_search'
                     })
+                    ai_tokens_added += 1
+            
+            # Remove duplicates based on coingecko_id
+            unique_tokens = {token['coingecko_id']: token for token in tokens if token['coingecko_id']}.values()
+            tokens = list(unique_tokens)
             
             print(f"Found {len(tokens)} tokens from CoinGecko")
             return tokens
@@ -251,26 +337,54 @@ class AITokenWatcher:
         """Fetch AI-related tokens from CoinMarketCap"""
         try:
             print("Fetching data from CoinMarketCap...")
-            url = "https://coinmarketcap.com/view/ai-crypto/"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers)
-            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Fetch from AI crypto category
+            ai_url = "https://coinmarketcap.com/view/ai-crypto/"
+            trending_url = "https://coinmarketcap.com/trending-cryptocurrencies/"
+            new_url = "https://coinmarketcap.com/new/"
             
             tokens = []
-            # Parse the webpage to extract token information
-            table = soup.find('table')
-            if table:
-                rows = table.find_all('tr')[1:]  # Skip header row
-                for row in rows:
-                    cols = row.find_all('td')
-                    if len(cols) >= 3:
-                        tokens.append({
-                            'name': cols[2].text.strip(),
-                            'symbol': cols[3].text.strip(),
-                            'source': 'coinmarketcap'
-                        })
+            
+            # Helper function to fetch and parse tokens from a URL
+            def fetch_tokens_from_url(url, source_tag):
+                tokens_from_source = 0
+                try:
+                    response = requests.get(url, headers=self.headers)
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    
+                    # Find all token rows
+                    table = soup.find('table')
+                    if table:
+                        rows = table.find_all('tr')[1:]  # Skip header row
+                        for row in rows:
+                            if tokens_from_source >= 5:  # Limit to 5 tokens per source
+                                break
+                            cols = row.find_all('td')
+                            if len(cols) >= 3:
+                                name_col = cols[2].text.strip()
+                                symbol_col = cols[3].text.strip()
+                                
+                                # Only add if it's AI-related for trending and new tokens
+                                if (source_tag == 'coinmarketcap_ai' or 
+                                    any(term in name_col.lower() or term in symbol_col.lower() 
+                                        for term in ['ai', 'artificial', 'intelligence', 'neural', 'machine', 'learn'])):
+                                    tokens.append({
+                                        'name': name_col,
+                                        'symbol': symbol_col,
+                                        'source': source_tag
+                                    })
+                                    tokens_from_source += 1
+                except Exception as e:
+                    print(f"Error fetching from {url}: {e}")
+            
+            # Fetch from all sources
+            fetch_tokens_from_url(ai_url, 'coinmarketcap_ai')
+            fetch_tokens_from_url(trending_url, 'coinmarketcap_trending')
+            fetch_tokens_from_url(new_url, 'coinmarketcap_new')
+            
+            # Remove duplicates based on symbol
+            unique_tokens = {token['symbol']: token for token in tokens}.values()
+            tokens = list(unique_tokens)
             
             print(f"Found {len(tokens)} tokens from CoinMarketCap")
             return tokens
